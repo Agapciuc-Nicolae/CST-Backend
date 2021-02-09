@@ -1,140 +1,124 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection.Metadata.Ecma335;
-using System.Threading.Tasks;
+﻿using Backend.Entities;
+using Backend.Entities.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using ViverBackend.Entities;
-using ViverBackend.Entities.Models;
-using ViverBackend.Payloads;
-using static ViverBackend.Enums;
+using Microsoft.Extensions.Configuration;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using static Backend.Enum;
 
-namespace ViverBackend.Controllers
+namespace Backend.Controllers
 {
-    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
     public class UserController : ControllerBase
     {
-        // comm
-        private readonly ViverContext _db;
-
-        public UserController(ViverContext db)
+        private IConfiguration _config { get; }
+        private readonly BackendContext _db;
+        public UserController(BackendContext db, IConfiguration configuration)
         {
+            _config = configuration;
             _db = db;
         }
 
-        // /user/getall?pageSize=50&pageNumber=2&sortType=1
-        [HttpGet]
-        public ActionResult<List<User>> GetAll(int pageSize, int pageNumber, UsersSortType sortType)
+        [HttpGet("getuser/{id}")]
+        public async Task<ActionResult<User>> GetUserById([FromRoute] long id)
+        {
+            try
+            {
+                return _db.Users
+                    .Include(user => user.Followers)
+                    .Include(user => user.Following)
+                    .Where(user => id == user.Id)
+                    .Single();
+
+            }
+            catch (Exception)
+            {
+                return new JsonResult(new { status = "false", message = "user id not found" });
+            }
+        }
+        [HttpGet("allUsers")]
+        public async Task<ActionResult<List<User>>> AllUsers(int pageSize, int pageNumber, UsersSortType sortType)
         {
             var currentUser = HttpContext.User;
-
-            if (currentUser.HasClaim(claim => claim.Type == "Role"))
+            if (currentUser.HasClaim(claims => claims.Type == "Role"))
             {
                 var role = currentUser.Claims.FirstOrDefault(c => c.Type == "Role").Value;
                 if (role == "Admin")
                 {
-                    // as no tracking for performance improvement when you do not need to track changes
-                    var usersQuery = _db.Users.AsNoTracking();
+                    var usersQuery = _db.Users.AsNoTracking().AsQueryable();
 
                     if (sortType == UsersSortType.FirstNameAscendent)
-                        usersQuery = usersQuery.OrderBy(u => u.FirstName);
+                        usersQuery = usersQuery.OrderBy(u => u.UserName);
                     else if (sortType == UsersSortType.FirstNameDescendent)
-                        usersQuery = usersQuery.OrderByDescending(u => u.FirstName);
+                        usersQuery = usersQuery.OrderBy(u => u.UserName);
                     else if (sortType == UsersSortType.LastNameAscendent)
-                        usersQuery = usersQuery.OrderBy(u => u.LastName);
+                        usersQuery = usersQuery.OrderBy(u => u.UserName);
                     else if (sortType == UsersSortType.LastNameDescendent)
-                        usersQuery = usersQuery.OrderByDescending(u => u.LastName);
-                    else
-                        usersQuery = usersQuery.OrderBy(u => u.FirstName);
+                        usersQuery = usersQuery.OrderBy(u => u.UserName);
+                    else usersQuery = usersQuery.OrderBy(u => u.UserName);
 
                     usersQuery = usersQuery
-                        .Skip((pageNumber - 1) * pageSize)
-                        .Take(pageSize);
+                            .Skip((pageNumber - 1) * pageSize)
+                            .Take(pageSize);
 
                     var users = usersQuery.ToList();
 
                     return users;
                 }
             }
+            return new JsonResult(new { status = "false" });
         }
 
-        [HttpGet]
-        public ActionResult<User> GetById(int Id)
+        [HttpPost("Follow")]
+        public async Task<IActionResult> Follow(String myUser, String followUser)
         {
-            return _db.Users.Where(user => Id == user.Id).Single();
-        }
 
-        [HttpPost]
-        public ActionResult<User> Create([FromBody] UserPayload payload)
-        {
-            try
+            var followQuery = _db.Follows.Where(follow => myUser == follow.User && followUser == follow.Follows);
+
+            if (myUser == followUser) return new JsonResult(new { status = "sameUser" });
+
+            if (!followQuery.Any())
             {
-                var userToAdd = new User
+
+                var follower = new Follow
                 {
-                    FirstName = payload.FirstName,
-                    LastName = payload.LastName,
-                    Email = payload.Email,
-                    Gender = payload.Gender
+                    User = myUser,
+                    Follows = followUser
                 };
 
-                _db.Users.Add(userToAdd);
+                _db.Follows.Add(follower);
                 _db.SaveChanges();
 
-                return Ok(userToAdd);
+                return new JsonResult(new { status = "follow" });
+
             }
-            catch (Exception)
+            else
             {
-                return new StatusCodeResult(StatusCodes.Status500InternalServerError);
-               
-            }
-        }
-
-        [HttpPost]
-        public ActionResult<User> Update([FromBody] UserPayload payload)
-        {
-            try
-            {
-                if (payload.Id.HasValue)
-                {
-                    var userToUpdate = _db.Users.SingleOrDefault(user => payload.Id.Value == user.Id);
-
-                    userToUpdate.FirstName = payload.FirstName;
-                    userToUpdate.LastName = payload.LastName;
-                    userToUpdate.Email = payload.Email;
-                    userToUpdate.Gender = payload.Gender;
-
-                    _db.SaveChanges();
-                    return Ok(userToUpdate);
-                }
-                else
-                {
-                    return new StatusCodeResult(StatusCodes.Status400BadRequest);
-                }
-            }
-            catch (Exception ex)
-            {
-                return new StatusCodeResult(StatusCodes.Status500InternalServerError);
-            }
-        }
-
-        [HttpDelete]
-        public ActionResult Delete(int Id)
-        {
-            try
-            {
-                var userToDelete = _db.Users.Single(user => Id == user.Id);
-
-                _db.Users.Remove(userToDelete);
+                _db.Follows.Remove(followQuery.Single());
                 _db.SaveChanges();
-                return Ok(new {status=true});
+                return new JsonResult(new { status = "unfollow" });
             }
-            catch (Exception)
+
+        }
+
+        [HttpGet("getUserList")]
+        public async Task<HashSet<String>> getUserList(string user)
+        {
+            var followQuery = _db.Follows.Where(follow => user == follow.User);
+            var userList = new HashSet<string>();
+
+            foreach (Follow f in followQuery.ToList())
             {
-                return new StatusCodeResult(StatusCodes.Status500InternalServerError);
+                userList.Add(f.Follows);
             }
+
+            return userList;
 
         }
     }

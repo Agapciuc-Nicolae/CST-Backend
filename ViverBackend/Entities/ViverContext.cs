@@ -1,47 +1,32 @@
-﻿using Microsoft.EntityFrameworkCore;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using ViverBackend.Entities.Models;
+using Backend.Entities.Models;
+using Microsoft.EntityFrameworkCore;
 
-namespace ViverBackend.Entities
+
+namespace Backend.Entities
 {
-    public class ViverContext : DbContext
+    public class BackendContext : DbContext
     {
-        public ViverContext(DbContextOptions options) : base(options)
+        public BackendContext(DbContextOptions options): base(options)
         {
 
         }
-
         public DbSet<User> Users { get; set; }
-
         public DbSet<Post> Posts { get; set; }
+        public DbSet<Follow> Follows { get; set; }
+        public DbSet<Like> Like { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            base.OnModelCreating(modelBuilder);
-
- 
-
-            modelBuilder.Entity<User>()
-                .HasMany(u => u.FollowedUsers)
-                .WithOne(fu => fu.Follows)
-                .HasForeignKey(fu => fu.FollowsId)
-                .OnDelete(DeleteBehavior.Restrict);
-
- 
-
-            modelBuilder.Entity<User>()
-                .HasMany(u => u.FollowsUsers)
-                .WithOne(fu => fu.FollowedBy)
-                .HasForeignKey(fu => fu.FollowedById)
-                .OnDelete(DeleteBehavior.Restrict);
-
- 
-
-            modelBuilder.Entity<User>()
-                .HasQueryFilter(u => !u.IsDeleted);
+            modelBuilder.Entity<User>().HasMany(b => b.Followers)
+            .WithMany(b => b.Following);
+            modelBuilder.Entity<User>().HasMany(b => b.Following)
+           .WithMany(b => b.Followers);
         }
+
+
     }
 }
